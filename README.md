@@ -1,3 +1,5 @@
+<img width="1536" height="1024" alt="PS2DEV-INSTALLER-BUNDLE" src="https://github.com/user-attachments/assets/1641fd9b-6466-439e-8614-ebfae5d6566e" />
+
 # PS2DEV Installer Bundle
 
 This bundle installs a fuller PlayStation 2 homebrew development environment on Ubuntu or Ubuntu running inside WSL. It installs `ps2toolchain`, builds `ps2sdk`, installs `ps2sdk-ports`, `gsKit`, `ps2-packer`, `ps2client`, modern memory-card tools (`mymc++`, `ps2vmc-tool`, `ps1vmc-tool`), writes the shell environment block, repairs older ERL build settings where needed, installs a known-good ERL hello sample, and runs verification at the end.
