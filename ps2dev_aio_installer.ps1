@@ -34,7 +34,10 @@ function Fail {
 function Quote-Bash {
     param([string]$Value)
 
-    return "'" + ($Value -replace "'", "'\"'\"'") + "'"
+    $singleQuote = [string][char]39
+    $doubleQuote = [string][char]34
+    $replacement = $singleQuote + $doubleQuote + $singleQuote + $doubleQuote + $singleQuote
+    return $singleQuote + $Value.Replace($singleQuote, $replacement) + $singleQuote
 }
 
 function Get-DefaultWslDistro {
