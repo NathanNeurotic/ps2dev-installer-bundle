@@ -1,0 +1,132 @@
+name: Release Bundle
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release tag to create, for example v1.0.0
+        required: true
+        type: string
+      release_name:
+        description: Optional release title override
+        required: false
+        type: string
+      prerelease:
+        description: Mark the GitHub release as a prerelease
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ inputs.version }}
+      RELEASE_NAME_INPUT: ${{ inputs.release_name }}
+      PRERELEASE: ${{ inputs.prerelease }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate release request
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          if [[ -z "$VERSION" ]]; then
+            echo "The version input is required." >&2
+            exit 1
+          fi
+
+          if [[ "$VERSION" =~ [[:space:]] ]]; then
+            echo "The version input must not contain whitespace: $VERSION" >&2
+            exit 1
+          fi
+
+          if [[ "$VERSION" == *:* || "$VERSION" == *..* || "$VERSION" == */* ]]; then
+            echo "The version input contains unsupported characters: $VERSION" >&2
+            exit 1
+          fi
+
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "A GitHub release already exists for tag $VERSION." >&2
+            exit 1
+          fi
+
+          if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+            tag_commit="$(git rev-list -n 1 "$VERSION")"
+            if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
+              echo "Tag $VERSION already exists at $tag_commit, not at the selected commit $GITHUB_SHA." >&2
+              exit 1
+            fi
+          fi
+
+      - name: Compute release metadata
+        id: vars
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          release_name="$RELEASE_NAME_INPUT"
+          if [[ -z "$release_name" ]]; then
+            release_name="PS2DEV Installer Bundle $VERSION"
+          fi
+
+          bundle_root="ps2dev-installer-bundle-$VERSION"
+          zip_name="$bundle_root.zip"
+
+          {
+            echo "release_name=$release_name"
+            echo "bundle_root=$bundle_root"
+            echo "zip_name=$zip_name"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build release archive
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          bundle_root="${{ steps.vars.outputs.bundle_root }}"
+          zip_name="${{ steps.vars.outputs.zip_name }}"
+
+          mkdir -p "dist/$bundle_root"
+          install -m 0644 README.md "dist/$bundle_root/README.md"
+          install -m 0644 ps2dev_aio_installer.bat "dist/$bundle_root/ps2dev_aio_installer.bat"
+          install -m 0644 ps2dev_aio_installer.ps1 "dist/$bundle_root/ps2dev_aio_installer.ps1"
+          install -m 0755 ps2dev_aio_installer.sh "dist/$bundle_root/ps2dev_aio_installer.sh"
+          install -m 0755 install.sh "dist/$bundle_root/install.sh"
+          install -m 0755 uninstall.sh "dist/$bundle_root/uninstall.sh"
+          install -m 0755 verify_install.sh "dist/$bundle_root/verify_install.sh"
+
+          (
+            cd dist
+            zip -r "$zip_name" "$bundle_root"
+          )
+
+      - name: Create GitHub release
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          zip_name="${{ steps.vars.outputs.zip_name }}"
+          release_name="${{ steps.vars.outputs.release_name }}"
+
+          args=(
+            "$VERSION"
+            "dist/$zip_name"
+            --title "$release_name"
+            --generate-notes
+            --target "$GITHUB_SHA"
+          )
+
+          if [[ "$PRERELEASE" == "true" ]]; then
+            args+=(--prerelease)
+          fi
+
+          gh release create "${args[@]}"

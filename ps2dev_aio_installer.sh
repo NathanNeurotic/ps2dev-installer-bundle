@@ -2,4 +2,4 @@
 set -Eeuo pipefail
 
 BUNDLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec "$BUNDLE_DIR/install.sh" "$@"
+exec bash "$BUNDLE_DIR/install.sh" "$@"
