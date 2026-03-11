@@ -1,6 +1,6 @@
 # PS2DEV Installer Bundle
 
-This bundle installs a full PlayStation 2 homebrew development environment on Ubuntu or Ubuntu running inside WSL. It installs `ps2toolchain`, builds `ps2sdk`, writes the shell environment block, repairs older ERL build settings where needed, installs a known-good ERL hello sample, and runs verification at the end.
+This bundle installs a fuller PlayStation 2 homebrew development environment on Ubuntu or Ubuntu running inside WSL. It installs `ps2toolchain`, builds `ps2sdk`, installs `ps2sdk-ports`, `gsKit`, `ps2-packer`, `ps2client`, modern memory-card tools (`mymc++`, `ps2vmc-tool`, `ps1vmc-tool`), writes the shell environment block, repairs older ERL build settings where needed, installs a known-good ERL hello sample, and runs verification at the end.
 
 This repository is aimed at two paths:
 
@@ -48,7 +48,7 @@ Nothing deeper than that should be required, but those basics are necessary.
 - `ps2dev_aio_installer.ps1` - Windows-side WSL handoff into the bundle directory
 - `ps2dev_aio_installer.sh` - thin shell entrypoint that calls `install.sh`
 - `install.sh` - main automated installer
-- `verify_install.sh` - validates toolchain commands, ERL artifacts, and sample builds
+- `verify_install.sh` - validates toolchain commands, `ps2sdk-ports`, `gsKit`, `ps2client`, `ps2-packer`, memory-card tools, ERL artifacts, and sample builds
 - `uninstall.sh` - removes the installed environment, cache, and shell profile block
 - `.github/workflows/release.yml` - manually triggered GitHub release workflow
 - `README.md` - installation, troubleshooting, and maintainer notes
@@ -61,15 +61,24 @@ Nothing deeper than that should be required, but those basics are necessary.
 4. Builds and installs the PS2 toolchain into `/usr/local/ps2dev` by default.
 5. Clones `ps2sdk` from the official `ps2dev` GitHub repository.
 6. Builds and installs `ps2sdk`.
-7. Writes an idempotent environment block into `~/.bashrc`.
-8. Patches older ERL build rules where legacy flags or dependency names are found.
-9. Builds ERL-related components where dedicated directories are present.
-10. Installs a modernized `samples/erl/hello` sample.
-11. Runs bundled verification for:
+7. Clones, builds, and installs `ps2sdk-ports`.
+8. Clones, builds, and installs `gsKit`.
+9. Clones, builds, and installs `ps2-packer`.
+10. Clones, builds, and installs `ps2client`.
+11. Installs the `mymc++` command-line tool in an isolated Python virtual environment and exposes both `mymcplusplus` and `mymc` commands.
+12. Clones, builds, and installs `ps2vmc-tool` and `ps1vmc-tool`.
+13. Writes an idempotent environment block into `~/.bashrc`.
+14. Patches older ERL build rules where legacy flags or dependency names are found.
+15. Builds ERL-related components where dedicated directories are present.
+16. Installs a modernized `samples/hello` sample and also exposes `samples/erl/hello` as a compatibility path.
+17. Runs bundled verification for:
     - `samples/debug/helloworld`
     - `samples/kernel/nanoHelloWorld`
     - `samples/graph`
-    - `samples/erl/hello`
+    - `samples/hello`
+    - installed `ps2sdk-ports` headers and libraries under `$PS2SDK/ports`
+    - installed commands such as `ee-gcc`, `iop-gcc`, `ps2client`, `fsclient`, `ps2-packer`, `mymc`, `mymcplusplus`, `ps2vmc-tool`, and `ps1vmc-tool`
+    - smoke tests that format and inspect temporary PS1/PS2 memory card images
 
 ## Quick Start
 
@@ -110,11 +119,45 @@ If you want the environment available in the current shell session immediately, 
 source ~/.bashrc
 ```
 
+The environment block also removes stale manual `PS2DEV` exports and `ee-*` / `iop-*` aliases from older setups, clears Bash's command hash, and then exports the wrapper command paths.
+
 Run verification again at any time:
 
 ```bash
 ./verify_install.sh
 ```
+
+## Using ps2link
+
+The host-side tools in this bundle are only half of the normal run/debug loop. On the console side, the usual PS2DEV workflow is:
+
+1. Boot through a homebrew entrypoint such as FreeMCBoot, FreeHDBoot, or OpenTuna.
+2. Launch `ps2link` on the console.
+3. Use the host-side `ps2client` or `fsclient` commands from Ubuntu.
+
+Set the target console IP one of two ways:
+
+```bash
+export PS2HOSTNAME=192.168.1.50
+```
+
+or pass it per command:
+
+```bash
+ps2client -h 192.168.1.50 execee host:myapp.elf
+```
+
+Common host-side commands:
+
+```bash
+ps2client -h "$PS2HOSTNAME" execee host:myapp.elf
+ps2client -h "$PS2HOSTNAME" listen
+fsclient -h "$PS2HOSTNAME" ls /
+```
+
+If `PS2HOSTNAME` is unset, `ps2client` falls back to its built-in default host address. For most users it is clearer and safer to set the console IP explicitly.
+
+This installer does not write `PS2HOSTNAME` into the managed shell block because that value is network-specific.
 
 Uninstall:
 
@@ -129,6 +172,8 @@ Default install root:
 ```bash
 export PS2DEV=/usr/local/ps2dev
 ```
+
+If you override `PS2DEV`, keep it as an absolute Linux path with no spaces and only simple path characters. Upstream PS2DEV tooling is much less reliable when this path is relative or contains spaces.
 
 Optional work/cache directory:
 
@@ -178,6 +223,12 @@ The installer creates and `chown`s the PS2DEV directory before building. If you 
 
 Check network access, DNS resolution, WSL proxy settings, and whether GitHub or Ubuntu mirrors are blocked.
 
+The installer also depends on the official Ubuntu-side build prerequisites, including `cmake`, `autopoint`, and the GMP/MPFR/MPC development packages. If you customized the script or trimmed packages manually, restore the full package list and rerun it.
+
+`ps2sdk-ports` is also a larger network-dependent step because it fetches and builds a collection of extra libraries during `make`. A temporary GitHub timeout or fetch failure there usually means rerunning the installer is enough.
+
+The `mymc` command installed by this bundle is a compatibility wrapper around modern `mymc++`, not the legacy Python 2 `ps2dev/mymc` script. This bundle installs the CLI form of `mymc++`, not the optional wxPython GUI.
+
 ### Environment variables do not appear in the current shell
 
 Run:
@@ -188,9 +239,34 @@ source ~/.bashrc
 
 or open a new Ubuntu shell.
 
+### You opened Ubuntu from PowerShell and landed in `/mnt/c/Windows/System32`
+
+That is a normal WSL starting directory when launched from Windows, but it is a bad place for manual clones or builds. If you are running follow-up commands yourself, move to your home or repo first:
+
+```bash
+cd ~
+```
+
+or:
+
+```bash
+cd ~/Github
+```
+
+### `ps2client` or `fsclient` cannot connect
+
+Make sure the console is already running `ps2link`, the PS2 and the host are on the same network, and `PS2HOSTNAME` or the `-h` argument points to the actual console IP.
+
+Useful manual checks:
+
+```bash
+echo "$PS2HOSTNAME"
+ps2client -h "$PS2HOSTNAME" listen
+```
+
 ### ERL verification fails
 
-The installer patches older ERL flags and dependency references when it finds them, then installs a known-good `samples/erl/hello` sample. Re-run:
+The installer patches older ERL flags and dependency references when it finds them, then installs a known-good `samples/hello` sample with a compatibility symlink at `samples/erl/hello`. Re-run:
 
 ```bash
 ./verify_install.sh
@@ -204,7 +280,13 @@ find /usr/local/ps2dev -type f \( -name 'liberl.erl' -o -name 'liberl.a' -o -nam
 
 ### Re-running the installer
 
-The installer is designed to be safe to rerun. It updates existing Git clones, refreshes the shell environment block, rebuilds the toolchain and SDK, and reruns verification.
+The installer is designed to be safe to rerun. It refreshes the shell environment block, rebuilds the toolchain and SDK, recreates any cached source repo that has installer-created tracked changes, and reruns verification.
+
+If a previous `ps2toolchain` build was interrupted, the installer now removes its cached `build/` directory before rebuilding.
+
+If you are recovering from a badly broken old install under `/usr/local/ps2dev`, run `./uninstall.sh` first for a true clean slate before reinstalling.
+
+Even with `ps2sdk-ports` included, some repos may still need project-specific third-party code outside the standard PS2DEV stack. If a local project still fails after this installer and `./verify_install.sh` both pass, the next thing to check is that repo's own dependency list.
 
 ## Logs
 

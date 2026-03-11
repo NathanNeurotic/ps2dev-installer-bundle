@@ -8,18 +8,25 @@ PS2SDK_DIR="$PS2DEV_DIR/ps2sdk"
 WORK_ROOT="${PS2DEV_WORK_ROOT:-$HOME/.cache/ps2dev-installer}"
 TOOLCHAIN_SRC="$WORK_ROOT/ps2toolchain"
 SDK_SRC="$WORK_ROOT/ps2sdk"
+PORTS_SRC="$WORK_ROOT/ps2sdk-ports"
+GSKIT_SRC="$WORK_ROOT/gsKit"
+PACKER_SRC="$WORK_ROOT/ps2-packer"
+CLIENT_SRC="$WORK_ROOT/ps2client"
+VMC_TOOL_SRC="$WORK_ROOT/ps2vmc-tool"
 LOG_DIR="$WORK_ROOT/logs"
 LOG_FILE="$LOG_DIR/install-$(date +%Y%m%d-%H%M%S).log"
 BASHRC_FILE="$HOME/.bashrc"
-TOTAL_STEPS=11
+TOTAL_STEPS=18
 CURRENT_STEP=0
 START_TS="$(date +%s)"
 
 APT_PACKAGES=(
   autoconf
   automake
+  autopoint
   bison
   build-essential
+  cmake
   curl
   flex
   gettext
@@ -39,6 +46,7 @@ APT_PACKAGES=(
   pkg-config
   python3
   python3-pip
+  python3-venv
   tar
   texinfo
   unzip
@@ -165,7 +173,17 @@ check_platform() {
   if ! grep -qiE 'ubuntu|debian' /etc/os-release; then
     fail "This installer targets Ubuntu/WSL. Detected: ${pretty_name:-unknown}"
   fi
+  if [[ "$PS2DEV_DIR" != /* ]]; then
+    fail "PS2DEV must be an absolute path. Current value: $PS2DEV_DIR"
+  fi
+  if [[ "$PS2DEV_DIR" == *[[:space:]]* ]]; then
+    fail "PS2DEV must not contain spaces. Current value: $PS2DEV_DIR"
+  fi
+  if ! [[ "$PS2DEV_DIR" =~ ^[A-Za-z0-9_./-]+$ ]]; then
+    fail "PS2DEV may only contain letters, numbers, '/', '.', '_' and '-'. Current value: $PS2DEV_DIR"
+  fi
   info "Target OS: ${pretty_name:-unknown}"
+  info "PS2DEV path: $PS2DEV_DIR"
   if grep -qi microsoft /proc/version 2>/dev/null || [[ -n "${WSL_DISTRO_NAME:-}" ]]; then
     info "WSL environment detected"
   fi
@@ -190,6 +208,13 @@ sync_repo() {
   local branch="${3:-master}"
 
   if [[ -d "$target_dir/.git" ]]; then
+    if ! git -C "$target_dir" diff --quiet --ignore-submodules -- || ! git -C "$target_dir" diff --cached --quiet --ignore-submodules --; then
+      warn "Cached repo has local tracked changes; recreating $target_dir"
+      rm -rf "$target_dir"
+    fi
+  fi
+
+  if [[ -d "$target_dir/.git" ]]; then
     info "Updating existing repo: $target_dir"
     run git -C "$target_dir" fetch --all --tags --prune
     run git -C "$target_dir" checkout "$branch"
@@ -210,6 +235,11 @@ install_toolchain() {
   export PS2SDK="$PS2SDK_DIR"
   export PATH="$PATH:$PS2DEV/bin:$PS2DEV/ee/bin:$PS2DEV/iop/bin:$PS2DEV/dvp/bin:$PS2SDK/bin"
 
+  if [[ -d "$TOOLCHAIN_SRC/build" ]]; then
+    info "Removing previous ps2toolchain build directory before rebuild"
+    run rm -rf "$TOOLCHAIN_SRC/build"
+  fi
+
   if [[ -f "$TOOLCHAIN_SRC/toolchain.sh" ]]; then
     run bash "$TOOLCHAIN_SRC/toolchain.sh"
   else
@@ -223,11 +253,103 @@ install_ps2sdk() {
 
   export PS2DEV="$PS2DEV_DIR"
   export PS2SDK="$PS2SDK_DIR"
+  export PS2SDKSRC="$SDK_SRC"
   export PATH="$PATH:$PS2DEV/bin:$PS2DEV/ee/bin:$PS2DEV/iop/bin:$PS2DEV/dvp/bin:$PS2SDK/bin"
 
   run make -C "$SDK_SRC" clean
   run make -C "$SDK_SRC"
   run make -C "$SDK_SRC" install
+}
+
+install_ps2sdk_ports() {
+  info "Cloning and building ps2sdk-ports"
+  sync_repo "https://github.com/ps2dev/ps2sdk-ports" "$PORTS_SRC" master
+
+  export PS2DEV="$PS2DEV_DIR"
+  export PS2SDK="$PS2SDK_DIR"
+  export PATH="$PATH:$PS2DEV/bin:$PS2DEV/ee/bin:$PS2DEV/iop/bin:$PS2DEV/dvp/bin:$PS2SDK/bin"
+
+  if [[ -d "$PORTS_SRC/build" ]]; then
+    info "Removing previous ps2sdk-ports build directory before rebuild"
+    run rm -rf "$PORTS_SRC/build"
+  fi
+
+  run make -C "$PORTS_SRC" clean || true
+  run make -C "$PORTS_SRC"
+}
+
+install_gskit() {
+  info "Cloning and building gsKit"
+  sync_repo "https://github.com/ps2dev/gsKit" "$GSKIT_SRC" master
+
+  export PS2DEV="$PS2DEV_DIR"
+  export PS2SDK="$PS2SDK_DIR"
+  export GSKIT="$PS2DEV_DIR/gsKit"
+  export PATH="$PATH:$PS2DEV/bin:$PS2DEV/ee/bin:$PS2DEV/iop/bin:$PS2DEV/dvp/bin:$PS2SDK/bin"
+
+  run make -C "$GSKIT_SRC" clean || true
+  run make -C "$GSKIT_SRC"
+  run make -C "$GSKIT_SRC" install
+}
+
+install_ps2_packer() {
+  info "Cloning and building ps2-packer"
+  sync_repo "https://github.com/ps2dev/ps2-packer" "$PACKER_SRC" master
+
+  export PS2DEV="$PS2DEV_DIR"
+  export PS2SDK="$PS2SDK_DIR"
+  export PATH="$PATH:$PS2DEV/bin:$PS2DEV/ee/bin:$PS2DEV/iop/bin:$PS2DEV/dvp/bin:$PS2SDK/bin"
+
+  run make -C "$PACKER_SRC" clean
+  run make -C "$PACKER_SRC"
+  run make -C "$PACKER_SRC" install
+}
+
+install_ps2client() {
+  info "Cloning and building ps2client"
+  sync_repo "https://github.com/ps2dev/ps2client" "$CLIENT_SRC" master
+
+  export PS2DEV="$PS2DEV_DIR"
+  export PS2SDK="$PS2SDK_DIR"
+  export PATH="$PATH:$PS2DEV/bin:$PS2DEV/ee/bin:$PS2DEV/iop/bin:$PS2DEV/dvp/bin:$PS2SDK/bin"
+
+  run make -C "$CLIENT_SRC" clean || true
+  run make -C "$CLIENT_SRC"
+  run make -C "$CLIENT_SRC" install
+}
+
+install_mymcplusplus() {
+  info "Installing mymc++ memory card utility"
+  local venv_dir="$PS2DEV_DIR/python-tools/mymcplusplus"
+  local bin_dir="$PS2DEV_DIR/bin"
+
+  run python3 -m venv "$venv_dir"
+  run "$venv_dir/bin/python" -m pip install --upgrade pip
+  run "$venv_dir/bin/python" -m pip install --upgrade mymcplusplus
+
+  mkdir -p "$bin_dir"
+
+  cat > "$bin_dir/mymcplusplus" <<EOF
+#!/usr/bin/env bash
+exec "$venv_dir/bin/mymcplusplus" "\$@"
+EOF
+  chmod +x "$bin_dir/mymcplusplus"
+
+  cat > "$bin_dir/mymc" <<EOF
+#!/usr/bin/env bash
+exec "$bin_dir/mymcplusplus" "\$@"
+EOF
+  chmod +x "$bin_dir/mymc"
+}
+
+install_ps2vmc_tool() {
+  info "Cloning and building ps2vmc-tool"
+  sync_repo "https://github.com/bucanero/ps2vmc-tool" "$VMC_TOOL_SRC" main
+
+  run make -C "$VMC_TOOL_SRC" clean || true
+  run make -C "$VMC_TOOL_SRC"
+  run install -m 0755 "$VMC_TOOL_SRC/ps2vmc-tool" "$PS2DEV_DIR/bin/ps2vmc-tool"
+  run install -m 0755 "$VMC_TOOL_SRC/ps1vmc-tool" "$PS2DEV_DIR/bin/ps1vmc-tool"
 }
 
 patch_env_block() {
@@ -238,13 +360,32 @@ patch_env_block() {
   awk -v s="$ENV_BLOCK_START" -v e="$ENV_BLOCK_END" '
     $0==s {skip=1; next}
     $0==e {skip=0; next}
+    /^export PS2DEV=/ {next}
+    /^export PS2SDK=/ {next}
+    /^export GSKIT=/ {next}
+    /^export PS2SDKSRC=/ {next}
+    /^PS2DEV=/ {next}
+    /^PS2SDK=/ {next}
+    /^GSKIT=/ {next}
+    /^PS2SDKSRC=/ {next}
+    /^export PATH=.*(PS2DEV|ps2dev|PS2SDK|ps2sdk)/ {next}
+    /^PATH=.*(PS2DEV|ps2dev|PS2SDK|ps2sdk)/ {next}
+    /^alias (ee-|iop-)/ {next}
     !skip {print}
   ' "$BASHRC_FILE" > "$tmp"
 
   cat >> "$tmp" <<ENVEOF
 $ENV_BLOCK_START
+# Clear stale manual aliases from older shell setups before PATH lookup.
+for _ps2_alias in ee-gcc ee-g++ ee-ar ee-as ee-ld ee-strip ee-objcopy ee-objdump iop-gcc iop-g++ iop-ar iop-as iop-ld iop-strip iop-objcopy iop-objdump; do
+  unalias "$_ps2_alias" 2>/dev/null || true
+done
+unset _ps2_alias
+hash -r 2>/dev/null || true
+
 export PS2DEV="$PS2DEV_DIR"
 export PS2SDK="\$PS2DEV/ps2sdk"
+export GSKIT="\$PS2DEV/gsKit"
 case ":\$PATH:" in
   *":\$PS2DEV/bin:\$PS2DEV/ee/bin:\$PS2DEV/iop/bin:\$PS2DEV/dvp/bin:\$PS2SDK/bin:"*) ;;
   *) export PATH="\$PATH:\$PS2DEV/bin:\$PS2DEV/ee/bin:\$PS2DEV/iop/bin:\$PS2DEV/dvp/bin:\$PS2SDK/bin" ;;
@@ -254,66 +395,89 @@ ENVEOF
   mv "$tmp" "$BASHRC_FILE"
 }
 
-write_erl_hello_sample() {
-  info "Installing modernized ERL hello sample"
-  local sample_dir="$PS2SDK_DIR/samples/erl/hello"
-  mkdir -p "$sample_dir"
+install_wrapper_script() {
+  local wrapper_name="$1"
+  local target_name="$2"
 
-  cat > "$sample_dir/Makefile" <<'MAKEEOF'
-EE_BIN = host.elf
-EE_OBJS = host.o
-EE_LIBS = -ldebug -lpatches -lc -lkernel
+  cat > "$PS2DEV_DIR/bin/$wrapper_name" <<EOF
+#!/usr/bin/env bash
+exec $target_name "\$@"
+EOF
+  chmod +x "$PS2DEV_DIR/bin/$wrapper_name"
+}
 
-ERL_BIN = hello.erl
-ERL_OBJS = hello.o
-ERL_LIBS = -lerl -lcglue -lkernel
+install_wrapper_commands() {
+  info "Installing ee-* and iop-* wrapper commands"
+  mkdir -p "$PS2DEV_DIR/bin"
 
-all: $(EE_BIN) $(ERL_BIN)
+  install_wrapper_script ee-gcc mips64r5900el-ps2-elf-gcc
+  install_wrapper_script ee-g++ mips64r5900el-ps2-elf-g++
+  install_wrapper_script ee-ar mips64r5900el-ps2-elf-ar
+  install_wrapper_script ee-as mips64r5900el-ps2-elf-as
+  install_wrapper_script ee-ld mips64r5900el-ps2-elf-ld
+  install_wrapper_script ee-strip mips64r5900el-ps2-elf-strip
+  install_wrapper_script ee-objcopy mips64r5900el-ps2-elf-objcopy
+  install_wrapper_script ee-objdump mips64r5900el-ps2-elf-objdump
 
-host.elf: $(EE_OBJS)
-	$(EE_CC) $(EE_CFLAGS) -o $@ $^ $(EE_LIBS)
+  install_wrapper_script iop-gcc mipsel-ps2-elf-gcc
+  install_wrapper_script iop-g++ mipsel-ps2-elf-g++
+  install_wrapper_script iop-ar mipsel-ps2-elf-ar
+  install_wrapper_script iop-as mipsel-ps2-elf-as
+  install_wrapper_script iop-ld mipsel-ps2-elf-ld
+  install_wrapper_script iop-strip mipsel-ps2-elf-strip
+  install_wrapper_script iop-objcopy mipsel-ps2-elf-objcopy
+  install_wrapper_script iop-objdump mipsel-ps2-elf-objdump
+}
 
-hello.erl: $(ERL_OBJS)
-	$(EE_CC) $(EE_CFLAGS) -Wl,-r -G0 -nostartfiles -o $@ $^ $(ERL_LIBS)
-	$(EE_STRIP) --strip-unneeded -R .mdebug.eabi64 -R .reginfo -R .comment $@
+write_fixed_erl_sample_makefile() {
+  local target_file="$1"
+
+  cat > "$target_file" <<'MAKEEOF'
+# _____     ___ ____     ___ ____
+#  ____|   |    ____|   |        | |____|
+# |     ___|   |____ ___|    ____| |    \    PS2DEV Open Source Project.
+#-----------------------------------------------------------------------
+# Copyright 2001-2004, ps2dev - http://www.ps2dev.org
+# Licenced under Academic Free License version 2.0
+# Review ps2sdk README & LICENSE files for further details.
+
+EE_ERL = hello.erl
+EE_OBJS = hello.o
+
+all: $(EE_ERL) erl-loader.elf liberl.erl libcglue.erl libkernel.erl
 
 clean:
-	rm -f $(EE_BIN) $(ERL_BIN) $(EE_OBJS) $(ERL_OBJS)
+	rm -f $(EE_ERL) $(EE_OBJS) erl-loader.elf liberl.erl libcglue.erl libkernel.erl
+
+erl-loader.elf:
+	cp $(PS2SDK)/ee/bin/erl-loader.elf $@
+
+liberl.erl:
+	cp $(PS2SDK)/ee/lib/liberl.erl $@
+
+libcglue.erl:
+	cp $(PS2SDK)/ee/lib/libcglue.erl $@
+
+libkernel.erl:
+	cp $(PS2SDK)/ee/lib/libkernel.erl $@
+
+run: $(EE_ERL) erl-loader.elf liberl.erl libcglue.erl libkernel.erl
+	ps2client execee host:erl-loader.elf $(EE_ERL)
+
+reset:
+	ps2client reset
 
 include $(PS2SDK)/samples/Makefile.pref
 include $(PS2SDK)/samples/Makefile.eeglobal
 MAKEEOF
-
-  cat > "$sample_dir/host.c" <<'CEOF'
-#include <debug.h>
-#include <erl.h>
-#include <kernel.h>
-#include <loadfile.h>
-#include <sifrpc.h>
-#include <stdio.h>
-
-extern int SifLoadFileInit(void);
-
-int main(int argc, char *argv[])
-{
-    init_scr();
-    SifInitRpc(0);
-    SifLoadFileInit();
-
-    scr_printf("PS2SDK ERL host sample\n");
-
-    _init_erl_prefix = "host:";
-
-    if (_init_load_erl("hello") < 0) {
-        scr_printf("Failed to load hello.erl\n");
-        SleepThread();
-    }
-
-    scr_printf("hello.erl loaded successfully\n");
-    SleepThread();
-    return 0;
 }
-CEOF
+
+write_erl_hello_sample() {
+  info "Installing modernized ERL hello sample"
+  local sample_dir="$PS2SDK_DIR/samples/hello"
+  mkdir -p "$sample_dir"
+  rm -f "$sample_dir/host.c" "$sample_dir/host.o" "$sample_dir/host.elf"
+  write_fixed_erl_sample_makefile "$sample_dir/Makefile"
 
   cat > "$sample_dir/hello.c" <<'CEOF'
 #include <debug.h>
@@ -340,44 +504,88 @@ int _fini(void)
     return 0;
 }
 CEOF
+
+  mkdir -p "$PS2SDK_DIR/samples/erl"
+  ln -sfn ../hello "$PS2SDK_DIR/samples/erl/hello"
 }
 
 patch_existing_erl_makefiles() {
-  info "Patching ERL sample/build rules for modern GCC compatibility where needed"
-  local root="$SDK_SRC"
-  [[ -d "$root" ]] || return 0
-
-  while IFS= read -r -d '' file; do
-    sed -i 's/-mno-crt0/-nostartfiles/g' "$file"
-    sed -i 's/libc\.erl/liberl.erl libcglue.erl libkernel.erl/g' "$file"
-  done < <(find "$root" -type f \( -name 'Makefile' -o -name '*.mk' -o -name '*.sh' \) -print0)
-}
-
-build_erl_components() {
-  info "Building liberl and erl-loader components"
-  export PS2DEV="$PS2DEV_DIR"
-  export PS2SDK="$PS2SDK_DIR"
-  export PATH="$PATH:$PS2DEV/bin:$PS2DEV/ee/bin:$PS2DEV/iop/bin:$PS2DEV/dvp/bin:$PS2SDK/bin"
-
-  local built_any=0
-  local -a candidates=(
-    "$SDK_SRC/ee/erl"
-    "$SDK_SRC/ee/erl/liberl"
-    "$SDK_SRC/ee/erl/loader"
-    "$SDK_SRC/ee/erl/samples"
+  info "Patching PS2SDK ERL rules for current GCC and installed sample layout"
+  local eglobal_files=(
+    "$SDK_SRC/samples/Makefile.eeglobal_sample"
+    "$SDK_SRC/samples/Makefile.eeglobal_cpp_sample"
+    "$PS2SDK_DIR/samples/Makefile.eeglobal"
+    "$PS2SDK_DIR/samples/Makefile.eeglobal_cpp"
   )
+  local file
 
-  for dir in "${candidates[@]}"; do
-    if [[ -f "$dir/Makefile" ]]; then
-      built_any=1
-      run make -C "$dir" clean || true
-      run make -C "$dir"
-      run make -C "$dir" install || true
+  for file in "${eglobal_files[@]}"; do
+    if [[ -f "$file" ]]; then
+      sed -i 's/-mno-crt0/-nostartfiles/g' "$file"
     fi
   done
 
+  if [[ -f "$SDK_SRC/ee/erl/samples/hello/Makefile.sample" ]]; then
+    write_fixed_erl_sample_makefile "$SDK_SRC/ee/erl/samples/hello/Makefile.sample"
+  fi
+
+  local erl_loader_makefile="$SDK_SRC/ee/erl-loader/Makefile"
+  if [[ -f "$erl_loader_makefile" ]]; then
+    if ! grep -Fq -- '-L$(PS2SDK)/ee/lib' "$erl_loader_makefile"; then
+      sed -i 's|-L$(PS2SDKSRC)/ee/kernel/lib|-L$(PS2SDKSRC)/ee/kernel/lib -L$(PS2SDK)/ee/lib|' "$erl_loader_makefile"
+    fi
+
+    if ! grep -Fq -- '-Wno-error=builtin-declaration-mismatch' "$erl_loader_makefile"; then
+      sed -i 's|EE_CFLAGS += |EE_CFLAGS += -Wno-error=builtin-declaration-mismatch |' "$erl_loader_makefile"
+    fi
+
+    if ! grep -Fq '$(EE_OBJS_DIR):' "$erl_loader_makefile"; then
+      cat >> "$erl_loader_makefile" <<'MAKEEOF'
+
+$(EE_OBJS_DIR):
+	$(MKDIR) -p $(EE_OBJS_DIR)
+
+$(EE_BIN_DIR):
+	$(MKDIR) -p $(EE_BIN_DIR)
+MAKEEOF
+    fi
+  fi
+}
+
+build_erl_components() {
+  info "Building and installing liberl and erl-loader components"
+  export PS2DEV="$PS2DEV_DIR"
+  export PS2SDK="$PS2SDK_DIR"
+  export PS2SDKSRC="$SDK_SRC"
+  export PATH="$PATH:$PS2DEV/bin:$PS2DEV/ee/bin:$PS2DEV/iop/bin:$PS2DEV/dvp/bin:$PS2SDK/bin"
+
+  local built_any=0
+  local erl_runtime_dir="$SDK_SRC/ee/erl"
+  local erl_loader_dir="$SDK_SRC/ee/erl-loader"
+
+  if [[ -f "$erl_runtime_dir/Makefile" ]]; then
+    built_any=1
+    mkdir -p "$erl_runtime_dir/obj" "$erl_runtime_dir/lib" "$PS2SDK_DIR/ee/lib"
+    run make -C "$erl_runtime_dir" clean || true
+    mkdir -p "$erl_runtime_dir/obj" "$erl_runtime_dir/lib"
+    run make -C "$erl_runtime_dir"
+    run install -m 0644 "$erl_runtime_dir/lib/liberl.a" "$PS2SDK_DIR/ee/lib/liberl.a"
+    run install -m 0644 "$erl_runtime_dir/lib/liberl.erl" "$PS2SDK_DIR/ee/lib/liberl.erl"
+  fi
+
+  if [[ -f "$erl_loader_dir/Makefile" ]]; then
+    built_any=1
+    mkdir -p "$erl_loader_dir/obj" "$erl_loader_dir/bin" "$PS2SDK_DIR/ee/bin"
+    run make -C "$erl_loader_dir" clean || true
+    mkdir -p "$erl_loader_dir/obj" "$erl_loader_dir/bin"
+    run make -C "$erl_loader_dir"
+    run install -m 0644 "$erl_loader_dir/bin/erl-loader.elf" "$PS2SDK_DIR/ee/bin/erl-loader.elf"
+  fi
+
   if [[ "$built_any" -eq 0 ]]; then
     warn "No dedicated ERL component directories were found; relying on top-level ps2sdk install artifacts"
+  else
+    success "ERL runtime artifacts were rebuilt and installed"
   fi
 }
 
@@ -387,6 +595,28 @@ verify_artifacts_exist() {
   local -a expected=(
     "$PS2DEV_DIR/ps2sdk/bin/ps2sdk-config"
     "$PS2DEV_DIR/ee/bin/ee-gcc"
+    "$PS2DEV_DIR/bin/ps2client"
+    "$PS2DEV_DIR/bin/fsclient"
+    "$PS2DEV_DIR/bin/ps2-packer"
+    "$PS2DEV_DIR/bin/mymc"
+    "$PS2DEV_DIR/bin/mymcplusplus"
+    "$PS2DEV_DIR/bin/ps2vmc-tool"
+    "$PS2DEV_DIR/bin/ps1vmc-tool"
+    "$PS2DEV_DIR/gsKit"
+    "$PS2DEV_DIR/gsKit/lib"
+    "$PS2SDK_DIR/ports"
+    "$PS2SDK_DIR/ports/include"
+    "$PS2SDK_DIR/ports/lib"
+    "$PS2SDK_DIR/ee/include"
+    "$PS2SDK_DIR/iop/include"
+    "$PS2SDK_DIR/ee/startup/linkfile"
+    "$PS2SDK_DIR/ee/lib/libkernel.a"
+    "$PS2SDK_DIR/ee/lib/libcglue.a"
+    "$PS2SDK_DIR/ee/lib/libpthreadglue.a"
+    "$PS2SDK_DIR/ee/lib/liberl.erl"
+    "$PS2SDK_DIR/ee/lib/libcglue.erl"
+    "$PS2SDK_DIR/ee/lib/libkernel.erl"
+    "$PS2SDK_DIR/ee/bin/erl-loader.elf"
   )
 
   for f in "${expected[@]}"; do
@@ -443,6 +673,24 @@ main() {
   step "Clone and build ps2sdk"
   install_ps2sdk
 
+  step "Clone and build ps2sdk-ports"
+  install_ps2sdk_ports
+
+  step "Clone and build gsKit"
+  install_gskit
+
+  step "Clone and build ps2-packer"
+  install_ps2_packer
+
+  step "Clone and build ps2client"
+  install_ps2client
+
+  step "Install mymc++ memory card utility"
+  install_mymcplusplus
+
+  step "Clone and build ps2vmc-tool"
+  install_ps2vmc_tool
+
   step "Patch legacy ERL build rules"
   patch_existing_erl_makefiles
 
@@ -451,6 +699,9 @@ main() {
 
   step "Write shell environment configuration"
   patch_env_block
+
+  step "Install ee-* and iop-* wrapper commands"
+  install_wrapper_commands
 
   step "Install the ERL hello sample"
   write_erl_hello_sample
@@ -464,6 +715,7 @@ main() {
   success "Installation completed successfully"
   info "Open a new shell or run: source ~/.bashrc"
   info "Re-run verification anytime with: ./verify_install.sh"
+  info "If you use ps2link, set PS2HOSTNAME or pass -h to ps2client/fsclient for your console IP"
   info "Elapsed time: $(format_duration "$(( $(date +%s) - START_TS ))")"
 }
 

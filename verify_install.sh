@@ -7,7 +7,7 @@ export PS2DEV="$PS2DEV_DIR"
 export PS2SDK="$PS2SDK_DIR"
 export PATH="$PATH:$PS2DEV/bin:$PS2DEV/ee/bin:$PS2DEV/iop/bin:$PS2DEV/dvp/bin:$PS2SDK/bin"
 
-TOTAL_SECTIONS=3
+TOTAL_SECTIONS=5
 CURRENT_SECTION=0
 START_TS="$(date +%s)"
 PASS_COUNT=0
@@ -148,6 +148,67 @@ build_sample() {
   fi
 }
 
+run_cmd_check() {
+  local label="$1"
+  shift
+  local stdout_file
+  local stderr_file
+  stdout_file="$(mktemp "${TMPDIR:-/tmp}/ps2dev-verify.out.XXXXXX")"
+  stderr_file="$(mktemp "${TMPDIR:-/tmp}/ps2dev-verify.err.XXXXXX")"
+  TEMP_FILES+=("$stdout_file" "$stderr_file")
+
+  if "$@" >"$stdout_file" 2>"$stderr_file"; then
+    pass "$label"
+  else
+    fail_item "$label"
+    if [[ -s "$stderr_file" ]]; then
+      sed 's/^/  /' "$stderr_file" || true
+    elif [[ -s "$stdout_file" ]]; then
+      sed 's/^/  /' "$stdout_file" || true
+    fi
+  fi
+}
+
+verify_memory_card_tools() {
+  local tmp_ps2
+  local tmp_ps1
+  tmp_ps2="$(mktemp "${TMPDIR:-/tmp}/ps2dev-vmc.XXXXXX.ps2")"
+  tmp_ps1="$(mktemp "${TMPDIR:-/tmp}/ps2dev-vmc.XXXXXX.mcr")"
+  TEMP_FILES+=("$tmp_ps2")
+  TEMP_FILES+=("$tmp_ps1")
+  rm -f "$tmp_ps2"
+  rm -f "$tmp_ps1"
+
+  run_cmd_check "mymc++ can format a PS2 memory card image" \
+    mymc -i "$tmp_ps2" format
+
+  if [[ -f "$tmp_ps2" ]]; then
+    run_cmd_check "mymc++ can inspect a formatted PS2 memory card image" \
+      mymc -i "$tmp_ps2" df
+  fi
+
+  run_cmd_check "ps2vmc-tool can format a PS2 virtual memory card" \
+    ps2vmc-tool "$tmp_ps2" --mc-format
+  run_cmd_check "ps2vmc-tool can inspect a PS2 virtual memory card" \
+    ps2vmc-tool "$tmp_ps2" --mc-info
+
+  run_cmd_check "ps1vmc-tool can format a PS1 virtual memory card" \
+    ps1vmc-tool "$tmp_ps1" --mc-format
+  run_cmd_check "ps1vmc-tool can inspect a PS1 virtual memory card" \
+    ps1vmc-tool "$tmp_ps1" --mc-info
+}
+
+runtime_workflow_guidance() {
+  if [[ -n "${PS2HOSTNAME:-}" ]]; then
+    info "PS2HOSTNAME is set to: $PS2HOSTNAME"
+    info "Remote run example: ps2client -h \"$PS2HOSTNAME\" execee host:your.elf"
+    info "Remote log example: ps2client -h \"$PS2HOSTNAME\" listen"
+  else
+    warn "PS2HOSTNAME is not set. For ps2link workflows, export PS2HOSTNAME=<your-ps2-ip> or pass -h to ps2client/fsclient."
+    info "Example: ps2client -h 192.168.1.50 execee host:your.elf"
+  fi
+}
+
 main() {
   banner "PS2DEV Verification" "Checks toolchain commands, ERL artifacts, and sample builds"
   info "PS2DEV root: $PS2DEV_DIR"
@@ -155,11 +216,32 @@ main() {
 
   section "Environment"
   check_cmd ee-gcc
+  check_cmd iop-gcc
   check_cmd ps2sdk-config
+  check_cmd ps2client
+  check_cmd fsclient
+  check_cmd ps2-packer
+  check_cmd mymc
+  check_cmd mymcplusplus
+  check_cmd ps2vmc-tool
+  check_cmd ps1vmc-tool
   check_file_glob "PS2DEV root exists" "$PS2DEV_DIR"
   check_file_glob "PS2SDK root exists" "$PS2SDK_DIR"
+  check_file_glob "gsKit root exists" "$PS2DEV_DIR/gsKit" "$PS2DEV_DIR/gsKit/lib"
+  check_file_glob "ps2-packer modules installed" "$PS2DEV_DIR/share/ps2-packer/module"
 
-  section "ERL artifacts"
+  section "Ports"
+  check_file_glob "PS2SDK ports root exists" "$PS2SDK_DIR/ports"
+  check_file_glob "PS2SDK ports headers installed" \
+    "$PS2SDK_DIR/ports/include/*.h" \
+    "$PS2SDK_DIR/ports/include"/**/*.h
+  check_file_glob "PS2SDK ports libraries installed" "$PS2SDK_DIR/ports/lib/*.a"
+
+  section "Runtime workflow"
+  runtime_workflow_guidance
+
+  section "Host tools and ERL artifacts"
+  verify_memory_card_tools
   check_file_glob "liberl.erl present" \
     "$PS2SDK_DIR/ee/erl/liberl.erl" \
     "$PS2SDK_DIR/erl/liberl.erl" \
@@ -172,13 +254,16 @@ main() {
     "$PS2SDK_DIR/samples/erl"/**/erl-loader.elf \
     "$PS2SDK_DIR/ee/erl"/**/erl-loader.elf \
     "$PS2DEV_DIR"/**/erl-loader.elf
+  check_file_glob "ERL hello sample path exists" \
+    "$PS2SDK_DIR/samples/hello" \
+    "$PS2SDK_DIR/samples/erl/hello"
 
   section "Sample builds"
   local base="$PS2SDK_DIR/samples"
   build_sample "samples/debug/helloworld" "$base/debug/helloworld"
   build_sample "samples/kernel/nanoHelloWorld" "$base/kernel/nanoHelloWorld"
   build_sample "samples/graph" "$base/graph"
-  build_sample "samples/erl/hello" "$base/erl/hello"
+  build_sample "samples/hello" "$base/hello"
 
   printf '\n'
   rule
