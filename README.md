@@ -131,9 +131,11 @@ Run verification again at any time:
 
 The host-side tools in this bundle are only half of the normal run/debug loop. On the console side, the usual PS2DEV workflow is:
 
-1. Boot through a homebrew entrypoint such as FreeMCBoot, FreeHDBoot, or OpenTuna.
+1. Boot through a homebrew entrypoint such as FreeMCBoot (FMCB), FreeHDBoot (FHDB), OpenTuna, OSDMenu, LOADBOOTER, or PS2BBL.
 2. Launch `ps2link` on the console.
 3. Use the host-side `ps2client` or `fsclient` commands from Ubuntu.
+
+This bundle does not require one specific loader. Use the one that fits your console and storage setup.
 
 Set the target console IP one of two ways:
 
