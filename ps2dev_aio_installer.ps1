@@ -7,10 +7,27 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+function Write-Status {
+    param(
+        [string]$Tag,
+        [string]$Message,
+        [string]$Color = 'Gray'
+    )
+
+    Write-Host "[$Tag] $Message" -ForegroundColor $Color
+}
+
+function Show-Banner {
+    Write-Host '------------------------------------------------------------' -ForegroundColor DarkGray
+    Write-Host 'PS2DEV Installer Bundle' -ForegroundColor Cyan
+    Write-Host 'Windows launcher into Ubuntu on WSL' -ForegroundColor DarkGray
+    Write-Host '------------------------------------------------------------' -ForegroundColor DarkGray
+}
+
 function Fail {
     param([string]$Message)
 
-    Write-Error $Message
+    Write-Status -Tag 'FAIL' -Message $Message -Color Red
     exit 1
 }
 
@@ -95,6 +112,12 @@ function Get-WslShareInfo {
     return $null
 }
 
+Show-Banner
+
+if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
+    Fail "wsl.exe was not found. Install WSL with Ubuntu first, or use https://www.github.com/NathanNeurotic/wsl-dev-pack"
+}
+
 $bundleDirWindows = $PSScriptRoot
 if (-not $bundleDirWindows) {
     Fail "Unable to determine the bundle directory."
@@ -103,12 +126,15 @@ if (-not $bundleDirWindows) {
 $wslShareInfo = Get-WslShareInfo $bundleDirWindows
 $preferredDistro = if ($wslShareInfo) { $wslShareInfo.Distro } else { $null }
 
+Write-Status -Tag 'INFO' -Message "Bundle path: $bundleDirWindows" -Color DarkGray
+Write-Status -Tag 'STEP' -Message 'Selecting an Ubuntu WSL distro' -Color Cyan
 $distro = Get-UbuntuDistro -PreferredDistro $preferredDistro
-Write-Host "Using WSL distro: $distro"
+Write-Status -Tag 'INFO' -Message "Using WSL distro: $distro" -Color Green
 
 if ($wslShareInfo -and $wslShareInfo.Distro -eq $distro) {
     $bundleDirWsl = $wslShareInfo.WslPath
 } else {
+    Write-Status -Tag 'STEP' -Message 'Translating the bundle path into WSL' -Color Cyan
     $bundleDirWsl = (& wsl.exe -d $distro wslpath -a -u $bundleDirWindows 2>$null | Select-Object -First 1)
     if ($LASTEXITCODE -ne 0 -or -not $bundleDirWsl) {
         Fail "Unable to translate the bundle path into WSL: $bundleDirWindows"
@@ -117,6 +143,7 @@ if ($wslShareInfo -and $wslShareInfo.Distro -eq $distro) {
 
 $bundleDirWsl = $bundleDirWsl.Trim()
 $bundleDirQuoted = Quote-Bash $bundleDirWsl
+Write-Status -Tag 'INFO' -Message "WSL path: $bundleDirWsl" -Color DarkGray
 
 $probeCommand = "cd $bundleDirQuoted && test -f ./ps2dev_aio_installer.sh"
 & wsl.exe -d $distro bash -lc $probeCommand | Out-Null
@@ -135,5 +162,11 @@ if ($quotedArgs.Count -gt 0) {
 }
 
 $installerCommand = "cd $bundleDirQuoted && bash ./ps2dev_aio_installer.sh$argSuffix"
+Write-Status -Tag 'STEP' -Message 'Launching the installer inside WSL' -Color Cyan
 & wsl.exe -d $distro bash -lc $installerCommand
+if ($LASTEXITCODE -eq 0) {
+    Write-Status -Tag ' OK ' -Message 'Installer session finished successfully' -Color Green
+} else {
+    Write-Status -Tag 'FAIL' -Message "Installer exited with code $LASTEXITCODE" -Color Red
+}
 exit $LASTEXITCODE
