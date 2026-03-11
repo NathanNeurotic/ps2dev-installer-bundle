@@ -162,15 +162,13 @@ ensure_dirs() {
 check_platform() {
   need_cmd bash
   need_cmd sudo
-  need_cmd git
-  need_cmd make
   need_cmd sed
   if [[ ! -f /etc/os-release ]]; then
     fail "Unsupported system: /etc/os-release not found. Ubuntu/WSL is required."
   fi
   local pretty_name
   pretty_name="$(grep '^PRETTY_NAME=' /etc/os-release | cut -d= -f2- | tr -d '"')"
-  if ! grep -qiE 'ubuntu|debian' /etc/os-release; then
+  if ! grep -qiE '(^ID=ubuntu$|^ID_LIKE=.*ubuntu)' /etc/os-release; then
     fail "This installer targets Ubuntu/WSL. Detected: ${pretty_name:-unknown}"
   fi
   if [[ "$PS2DEV_DIR" != /* ]]; then
@@ -348,6 +346,7 @@ install_ps2vmc_tool() {
 
   run make -C "$VMC_TOOL_SRC" clean || true
   run make -C "$VMC_TOOL_SRC"
+  mkdir -p "$PS2DEV_DIR/bin"
   run install -m 0755 "$VMC_TOOL_SRC/ps2vmc-tool" "$PS2DEV_DIR/bin/ps2vmc-tool"
   run install -m 0755 "$VMC_TOOL_SRC/ps1vmc-tool" "$PS2DEV_DIR/bin/ps1vmc-tool"
 }
@@ -357,7 +356,7 @@ patch_env_block() {
   local tmp
   tmp="$(mktemp)"
   touch "$BASHRC_FILE"
-  awk -v s="$ENV_BLOCK_START" -v e="$ENV_BLOCK_END" '
+  awk -v s="$ENV_BLOCK_START" -v e="$ENV_BLOCK_END" -v ps2dev_path="$PS2DEV_DIR" -v ps2sdk_path="$PS2SDK_DIR" '
     $0==s {skip=1; next}
     $0==e {skip=0; next}
     /^export PS2DEV=/ {next}
@@ -368,8 +367,12 @@ patch_env_block() {
     /^PS2SDK=/ {next}
     /^GSKIT=/ {next}
     /^PS2SDKSRC=/ {next}
-    /^export PATH=.*(PS2DEV|ps2dev|PS2SDK|ps2sdk)/ {next}
-    /^PATH=.*(PS2DEV|ps2dev|PS2SDK|ps2sdk)/ {next}
+    (/^export PATH=/ || /^PATH=/) && (
+      index($0, "PS2DEV") ||
+      index($0, "PS2SDK") ||
+      index($0, ps2dev_path) ||
+      index($0, ps2sdk_path)
+    ) {next}
     /^alias (ee-|iop-)/ {next}
     !skip {print}
   ' "$BASHRC_FILE" > "$tmp"
@@ -594,7 +597,10 @@ verify_artifacts_exist() {
   local missing=0
   local -a expected=(
     "$PS2DEV_DIR/ps2sdk/bin/ps2sdk-config"
-    "$PS2DEV_DIR/ee/bin/ee-gcc"
+    "$PS2DEV_DIR/bin/ee-gcc"
+    "$PS2DEV_DIR/bin/iop-gcc"
+    "$PS2DEV_DIR/ee/bin/mips64r5900el-ps2-elf-gcc"
+    "$PS2DEV_DIR/iop/bin/mipsel-ps2-elf-gcc"
     "$PS2DEV_DIR/bin/ps2client"
     "$PS2DEV_DIR/bin/fsclient"
     "$PS2DEV_DIR/bin/ps2-packer"

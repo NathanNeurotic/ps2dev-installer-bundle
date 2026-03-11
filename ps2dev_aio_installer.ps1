@@ -52,6 +52,17 @@ function Get-DefaultWslDistro {
     return $null
 }
 
+function Test-UbuntuDistro {
+    param([string]$Distro)
+
+    if (-not $Distro) {
+        return $false
+    }
+
+    & wsl.exe -d $Distro bash -lc "grep -qiE '(^ID=ubuntu$|^ID_LIKE=.*ubuntu)' /etc/os-release" 2>$null | Out-Null
+    return ($LASTEXITCODE -eq 0)
+}
+
 function Get-UbuntuDistro {
     param([string]$PreferredDistro)
 
@@ -73,20 +84,20 @@ function Get-UbuntuDistro {
     if ($PreferredDistro) {
         $preferredMatch = $distros | Where-Object { $_ -eq $PreferredDistro } | Select-Object -First 1
         if ($preferredMatch) {
-            if ($preferredMatch -match '(?i)ubuntu') {
+            if (Test-UbuntuDistro -Distro $preferredMatch) {
                 return $preferredMatch
             }
 
-            Fail "The bundle path points at WSL distro '$preferredMatch', but this launcher expects an Ubuntu distro."
+            Fail "The bundle path points at WSL distro '$preferredMatch', but that distro does not report itself as Ubuntu."
         }
     }
 
     $defaultDistro = Get-DefaultWslDistro
-    if ($defaultDistro -and $defaultDistro -match '(?i)ubuntu') {
+    if (Test-UbuntuDistro -Distro $defaultDistro) {
         return $defaultDistro
     }
 
-    $ubuntuDistro = $distros | Where-Object { $_ -match '(?i)ubuntu' } | Select-Object -First 1
+    $ubuntuDistro = $distros | Where-Object { Test-UbuntuDistro -Distro $_ } | Select-Object -First 1
     if ($ubuntuDistro) {
         return $ubuntuDistro
     }

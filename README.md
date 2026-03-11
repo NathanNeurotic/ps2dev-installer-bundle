@@ -14,7 +14,9 @@ If you do not already have WSL + Ubuntu or Ubuntu set up, use the prerequisite a
 - Windows with WSL and an Ubuntu distro
 - Ubuntu running directly
 
-The installer currently checks `/etc/os-release` for `ubuntu|debian`, but this bundle is written and documented for Ubuntu-first usage, especially on WSL.
+On Windows, the launcher accepts Ubuntu distros even if the WSL distro name itself has been renamed, as long as the distro reports Ubuntu in `/etc/os-release`.
+
+The installer checks `/etc/os-release` for Ubuntu identity (`ID=ubuntu` or `ID_LIKE=...ubuntu...`), because this bundle is written and documented for Ubuntu-first usage, especially on WSL.
 
 ## Prerequisites
 
@@ -24,7 +26,7 @@ Before running this bundle, already have all of the following:
   - WSL installed with an Ubuntu distro that appears in `wsl.exe -l -q`
   - Ubuntu running directly
 - `sudo` access in Ubuntu, because the installer runs `apt-get`, creates the install root, and updates ownership
-- Network access to GitHub and Ubuntu package mirrors
+- Network access to GitHub, Ubuntu package mirrors, and PyPI
 - Enough free disk space for package downloads, cloned source trees, build artifacts, and the final install under `/usr/local/ps2dev` by default
 - The bundle stored in a location your Ubuntu environment can access
 
@@ -42,7 +44,7 @@ Minimum knowledge expected before you run this:
 
 Nothing deeper than that should be required, but those basics are necessary.
 
-## Files in this bundle
+## Files in this repo
 
 - `ps2dev_aio_installer.bat` - double-clickable Windows launcher for WSL users
 - `ps2dev_aio_installer.ps1` - Windows-side WSL handoff into the bundle directory
@@ -50,7 +52,7 @@ Nothing deeper than that should be required, but those basics are necessary.
 - `install.sh` - main automated installer
 - `verify_install.sh` - validates toolchain commands, `ps2sdk-ports`, `gsKit`, `ps2client`, `ps2-packer`, memory-card tools, ERL artifacts, and sample builds
 - `uninstall.sh` - removes the installed environment, cache, and shell profile block
-- `.github/workflows/release.yml` - manually triggered GitHub release workflow
+- `.github/workflows/release.yml` - repo-only maintainer workflow used to publish release ZIPs
 - `README.md` - installation, troubleshooting, and maintainer notes
 
 ## What the installer does
